@@ -5,8 +5,8 @@ const app = express();
 //상수앱은 변수 익스프레스를 대입
 const mysql = require("mysql");
 //상수 mysql은 mysql모듈을 사용하겠다는 의미
-const PORT = process.env.port || 9700;
-//상수 포트는 포트넘버를 8000번으로 설정
+const PORT = process.env.port || 8080;
+//상수 포트는 포트넘버를 8080번으로 설정
 const bodyParser = require("body-parser");
 
 let corsOptions = {
@@ -32,36 +32,124 @@ app.listen(PORT, () => {
 })
 
 //list
-app.get("/list", (req, res) => {
-    const sqlQuery = //명령문
-        "select BOARD_ID, BOARD_TITLE, REGISTER_ID, DATE_FORMAT(REGISTER_DATE, '%Y-%m-%d') AS REGISTER_DATE FROM BOARD;";
-    db.query(sqlQuery, (err, result) => {
+/*app.get("/list", (req, res) => { // 기본값 설정
+    const page = parseInt(req.query.page) || 1; // 현재 페이지, 기본 1
+    const limit = parseInt(req.query.limit) || 10; // 한 페이지당 데이터 개수, 기본 10
+    const offset = (page - 1) * limit; // 건너뛸 행 수
+    
+    //명령문 실행
+    const sqlQuery = `
+        SELECT BOARD_ID, BOARD_TITLE, REGISTER_ID, DATE_FORMAT(REGISTER_DATE, '%Y-%m-%d') AS REGISTER_DATE
+        FROM BOARD
+        ORDER BY BOARD_ID DESC
+        LIMIT ? OFFSET ?;
+    `;
+
+    //const sqlQuery = 
+    //"select BOARD_ID, BOARD_TITLE, REGISTER_ID, DATE_FORMAT(REGISTER_DATE, '%Y-%m-%d') AS REGISTER_DATE FROM BOARD;";
+    db.query(sqlQuery, (err, result) =>{
         res.send(result);
     })
-})
 
-//read
-app.post("/detail", (req, res) => {
-    const id = req.body.id; // 클라이언트로부터 id{}값 요청 본문에서 가져옴
-    const sqlQuery = // 주어진 id에 해당하는 게시글 정보 조회
-        "SELECT BOARD_ID, BOARD_TITLE, BOARD_CONTENT FROM BOARD WHERE BOARD_ID = ?;";
-    db.query(sqlQuery, (err, result) => { //db.query를 사용해서 mtsql db에 qurey 실행
-        res.send(result) // 결과 전송
-    })
-})
+})*/
+app.get("/list", (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.size) || 10;
+    const offset = (page - 1) * limit;
+
+    // 게시글 목록 가져오기
+    const sqlQuery = `
+      SELECT BOARD_ID, BOARD_TITLE, REGISTER_ID, DATE_FORMAT(REGISTER_DATE, '%Y-%m-%d') AS REGISTER_DATE
+      FROM BOARD
+      ORDER BY BOARD_ID DESC
+      LIMIT ? OFFSET ?;
+    `;
+
+    // 총 게시글 수 구하기
+    const countQuery = `SELECT COUNT(*) AS totalCount FROM BOARD;`;
+
+    db.query(countQuery, (err, countResult) => {
+        if (err) {
+            res.status(500).json({ error: "카운트 조회 실패" });
+            return;
+        }
+
+        const totalCount = countResult[0].totalCount;
+
+        db.query(sqlQuery, [limit, offset], (err, listResult) => {
+            if (err) {
+                res.status(500).json({ error: "목록 조회 실패" });
+                return;
+            }
+
+            res.json({
+                data: listResult,
+                totalCount: totalCount,
+            });
+        });
+    });
+});
 
 //글쓰기
 app.post("/insert", (req, res) => {
     const title = req.body.title; //숫자가 자동으로 1 증가
     const content = req.body.title;
-
-    const splQuery =
-        "INSERT INTO BOARD (BOARD_TITLE, BOARD_CONTENT, BREGISTER_ID) VALUSE (?, ?, '지연')"
+    const sqlQuery =
+        "INSERT INTO BOARD (BOARD_TITLE, BOARD_CONTENT, REGISTER_ID) VALUES (?, ?, '지연')"
     db.query(sqlQuery, [title, content], (err, result) => {
         res.send(result);
-    })
+    });
+});
 
-})
+//UPDATE 수정 (25.06.05)
+app.post("/update", (req, res) => {
+    const id = req.body.id; // 상수(id)를 수정요청한 id
+    const title = req.body.title;
+    const content = req.body.content;
+
+    const sqlQuery =
+        "UPDATE BOARD SET BORAD_TITLE = ?, BORAD_CONTENT = ?, UPDATER_ID = '지연' WHERE BOARD_ID=?;";
+    db.query(sqlQuery, [title, content, id], (err, result) => {
+
+        // 에러를 처리할 경우
+        if (err) {
+            console.error("데이터베이스 수정중 에러발생", err);
+            return res.status(500).send("내부오류 또는 오타발생")
+        }
+
+        res.send(result);
+
+    });
+});
+
+//DELETE 삭제 (25.06.05)
+app.post("/delete", (req, res) => {
+    const id = req.body.boradIdList; // 삭제할때는 순번을 눌러서 삭제
+
+    if (!Array.isArray(idList) || idList.length === 0) {
+        //boardIdList가 배열인지 확인(Array), 배열이 비어있지 않은지
+        return res.status(400).send("Invalid boardIdList");
+        //유효하지 않은 경우 400 bad req 응답 리턴
+    }
+
+    const placeholders = idList.map(() => '?').join('.');
+    //idList.length만큼 ? 를 만들어 쿼리에 바인딩
+
+    const sqlQuery = `DELETE FROM BOARD WHERE BOARD_ID IN (${placeholders})`;
+    //sql 인젝션 방지, 사용자 입력이 직접 문자열로 삽입되지 않고 안전하게 파라미터 처리
+
+    db.query(sqlQuery, idList, (err, result) => {
+        // 에러를 처리할 경우
+        if (err) {
+            console.error("데이터베이스 삭제중 에러발생", err);
+            return res.status(500).send("내부오류 또는 오타발생")
+        }
+
+        res.send(result);
+    });
+});
+
+
 
 
 /*서버가 생겼는지 테스트 로컬호스트에 접속할때 실행하는대로 확인
